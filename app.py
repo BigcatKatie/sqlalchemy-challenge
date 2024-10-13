@@ -1,29 +1,27 @@
 # Import the dependencies.
 from flask import Flask, jsonify
-import numpy as np
 import pandas as pd
+import datetime as dt
 from sqlalchemy import create_engine, func
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.automap import automap_base
-import datetime as dt
 
 #################################################
 # Database Setup
 #################################################
+
+# Create engine using the 'hawaii.sqlite'
 engine = create_engine("sqlite:///Resources/hawaii.sqlite")
 
-# reflect an existing database into a new model
+# Declare a Base using 'automap_base()'
 Base = automap_base()
 
-# reflect the tables
-Base.prepare(engine, reflect=True)
+# Use the Base class to reflect the database tables
+Base.prepare(autoload_with=engine)
 
-# Save references to each table
+# Assign the measurement class to a variable called 'Measurement' and the station class to a variable called 'station'
 Measurement = Base.classes.measurement
 Station = Base.classes.station
-
-# Create our session (link) from Python to the DB
-session = Session(engine)
 
 #################################################
 # Flask Setup
@@ -32,15 +30,13 @@ session = Session(engine)
 # Initialize the Flask app
 app = Flask(__name__)
 
-
-
 #################################################
 # Flask Routes
 #################################################
 # Home route
 @app.route("/")
 def welcome():
-    """List all available API routes."""
+    """List all available API routes"""
     return (
         f"Available Routes:<br/>"
         f"/api/v1.0/precipitation<br/>"
@@ -54,6 +50,8 @@ def welcome():
 @app.route("/api/v1.0/precipitation")
 def precipitation():
     """Return the precipitation data for the last 12 months"""
+    session = Session(engine)
+
     # Find the most recent date in the dataset
     latest_date = session.query(func.max(Measurement.date)).scalar()
     one_year_ago = dt.datetime.strptime(latest_date, "%Y-%m-%d") - dt.timedelta(days=365)
@@ -61,6 +59,8 @@ def precipitation():
     # Query for the last 12 months of precipitation data
     precipitation_data = session.query(Measurement.date, Measurement.prcp).\
         filter(Measurement.date >= one_year_ago).all()
+
+    session.close()
 
     # Create a dictionary using 'date' as the key and 'prcp' as the value
     precipitation_dict = {date: prcp for date, prcp in precipitation_data}
@@ -71,11 +71,15 @@ def precipitation():
 @app.route("/api/v1.0/stations")
 def stations():
     """Return a list of all stations"""
+    session = Session(engine)
+
     # Query all stations
     stations_data = session.query(Station.station).all()
 
+    session.close()
+
     # Convert the query result into a list
-    stations_list = list(np.ravel(stations_data))
+    stations_list = list(map(lambda x: x[0], stations_data))
 
     return jsonify(stations_list)
 
@@ -83,6 +87,8 @@ def stations():
 @app.route("/api/v1.0/tobs")
 def tobs():
     """Return the temperature observations for the most active station over the last year"""
+    session = Session(engine)
+
     # Find the most active station
     most_active_station = session.query(Measurement.station, func.count(Measurement.station)).\
         group_by(Measurement.station).\
@@ -93,12 +99,14 @@ def tobs():
     one_year_ago = dt.datetime.strptime(latest_date, "%Y-%m-%d") - dt.timedelta(days=365)
 
     # Query the temperature observations for the last year for the most active station
-    temperature_data = session.query(Measurement.date, Measurement.tobs).\
+    temperature_data = session.query(Measurement.tobs).\
         filter(Measurement.station == most_active_station).\
         filter(Measurement.date >= one_year_ago).all()
 
+    session.close()
+
     # Convert the query result into a list
-    temperature_list = list(np.ravel(temperature_data))
+    temperature_list = list(map(lambda x: x[0], temperature_data))
 
     return jsonify(temperature_list)
 
@@ -108,15 +116,18 @@ def tobs():
 def temperature_range(start, end=None):
     """Return the min, avg, and max temperature for all dates greater than or equal to the start date, 
     or for a range between the start and end date"""
-    
+    session = Session(engine)
 
-    # Query the temperature statistics (TMIN, TAVG, TMAX)
     if end:
+        # Filter between start and end date
         temperature_stats = session.query(func.min(Measurement.tobs), func.avg(Measurement.tobs), func.max(Measurement.tobs)).\
             filter(Measurement.date >= start).filter(Measurement.date <= end).all()
     else:
+        # Filter for data after the start date
         temperature_stats = session.query(func.min(Measurement.tobs), func.avg(Measurement.tobs), func.max(Measurement.tobs)).\
             filter(Measurement.date >= start).all()
+
+    session.close()
 
     # Convert the query result into a dictionary
     temperature_dict = {
@@ -126,11 +137,6 @@ def temperature_range(start, end=None):
     }
 
     return jsonify(temperature_dict)
-
-# Close the session when shutting down the app
-@app.teardown_appcontext
-def shutdown_session(exception=None):
-    session.close()
 
 if __name__ == '__main__':
     app.run(debug=True)
